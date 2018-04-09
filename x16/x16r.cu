@@ -31,7 +31,7 @@ extern "C" {
 
 #include "miner.h"
 #include "cuda_helper.h"
-#include "cuda_x16r.h"
+#include "cuda_x16.h"
 
 static uint32_t *d_hash[MAX_GPUS];
 
@@ -76,7 +76,6 @@ static const char* algo_strings[] = {
 };
 
 static __thread uint32_t s_ntime = UINT32_MAX;
-static __thread bool s_implemented = false;
 static __thread char hashOrder[HASH_FUNC_COUNT + 1] = { 0 };
 
 static void getAlgoString(const uint32_t* prevblock, char *output)
@@ -228,6 +227,7 @@ void whirlpool_midstate(void *state, const void *input)
 }
 
 static bool init[MAX_GPUS] = { 0 };
+static bool use_compat_kernels[MAX_GPUS] = { 0 };
 
 //#define _DEBUG
 #define _DEBUG_PREFIX "x16r-"
@@ -258,6 +258,11 @@ extern "C" int scanhash_x16r(int thr_id, struct work* work, uint32_t max_nonce, 
 		}
 		gpulog(LOG_INFO, thr_id, "Intensity set to %g, %u cuda threads", throughput2intensity(throughput), throughput);
 
+		cuda_get_arch(thr_id);
+		use_compat_kernels[thr_id] = (cuda_arch[dev_id] < 500);
+		if (use_compat_kernels[thr_id])
+			x11_echo512_cpu_init(thr_id, throughput);
+
 		quark_blake512_cpu_init(thr_id, throughput);
 		quark_bmw512_cpu_init(thr_id, throughput);
 		quark_groestl512_cpu_init(thr_id, throughput);
@@ -268,7 +273,6 @@ extern "C" int scanhash_x16r(int thr_id, struct work* work, uint32_t max_nonce, 
 		x11_luffa512_cpu_init(thr_id, throughput); // 64
 		x11_shavite512_cpu_init(thr_id, throughput);
 		x11_simd512_cpu_init(thr_id, throughput); // 64
-		x11_echo512_cpu_init(thr_id, throughput);
 		x16_echo512_cuda_init(thr_id, throughput);
 		x13_hamsi512_cpu_init(thr_id, throughput);
 		x13_fugue512_cpu_init(thr_id, throughput);
@@ -287,8 +291,8 @@ extern "C" int scanhash_x16r(int thr_id, struct work* work, uint32_t max_nonce, 
 
 	if (opt_benchmark) {
 		((uint32_t*)ptarget)[7] = 0x003f;
-		((uint8_t*)pdata)[8] = 0x90; // hashOrder[0] = '9'; for simd 80 + blake512 64
-		//((uint8_t*)pdata)[8] = 0xA0; // hashOrder[0] = 'A'; for echo 80 + blake512 64
+		//((uint8_t*)pdata)[8] = 0x90; // hashOrder[0] = '9'; for simd 80 + blake512 64
+		((uint8_t*)pdata)[8] = 0xAA; // hashOrder[0] = 'A'; for echo 80 + 64
 		//((uint8_t*)pdata)[8] = 0xB0; // hashOrder[0] = 'B'; for hamsi 80 + blake512 64
 		//((uint8_t*)pdata)[8] = 0xC0; // hashOrder[0] = 'C'; for fugue 80 + blake512 64
 		//((uint8_t*)pdata)[8] = 0xE0; // hashOrder[0] = 'E'; for whirlpool 80 + blake512 64
@@ -302,13 +306,7 @@ extern "C" int scanhash_x16r(int thr_id, struct work* work, uint32_t max_nonce, 
 	if (s_ntime != ntime) {
 		getAlgoString(&endiandata[1], hashOrder);
 		s_ntime = ntime;
-		s_implemented = true;
 		if (opt_debug && !thr_id) applog(LOG_DEBUG, "hash order %s (%08x)", hashOrder, ntime);
-	}
-
-	if (!s_implemented) {
-		sleep(1);
-		return -1;
 	}
 
 	cuda_check_cpu_setTarget(ptarget);
@@ -366,10 +364,6 @@ extern "C" int scanhash_x16r(int thr_id, struct work* work, uint32_t max_nonce, 
 			x16_sha512_setBlock_80(endiandata);
 			break;
 		default: {
-			if (!thr_id)
-				applog(LOG_WARNING, "kernel %s %c unimplemented, order %s", algo_strings[algo80], elem, hashOrder);
-			s_implemented = false;
-			sleep(5);
 			return -1;
 		}
 	}
@@ -495,7 +489,10 @@ extern "C" int scanhash_x16r(int thr_id, struct work* work, uint32_t max_nonce, 
 				TRACE("simd   :");
 				break;
 			case ECHO:
-				x11_echo512_cpu_hash_64(thr_id, throughput, pdata[19], NULL, d_hash[thr_id], order++);
+				if (use_compat_kernels[thr_id])
+					x11_echo512_cpu_hash_64(thr_id, throughput, pdata[19], NULL, d_hash[thr_id], order++);
+				else
+					x16_echo512_cpu_hash_64(thr_id, throughput, d_hash[thr_id]); order++;
 				TRACE("echo   :");
 				break;
 			case HAMSI:
