@@ -1258,11 +1258,11 @@ uint32_t fastkdf32_v3(uint32_t thread, const uint32_t nonce, uint32_t* const sal
 
 #define BLAKE_Ghost(idx0, idx1, a, b, c, d, key) { \
 	idx = BLAKE2S_SIGMA_host[idx0][idx1]; a += key[idx]; \
-	a += b; d = ROTR32(d^a,16); \
-	c += d; b = ROTR32(b^c, 12); \
-	idx = BLAKE2S_SIGMA_host[idx0][idx1+1]; a += key[idx]; \
-	a += b; d = ROTR32(d^a,8); \
-	c += d; b = ROTR32(b^c, 7); \
+	a += b; d = ROTR32(d ^ a,16); \
+	c += d; b = ROTR32(b ^ c, 12); \
+	idx = BLAKE2S_SIGMA_host[idx0][idx1 + 1]; a += key[idx]; \
+	a += b; d = ROTR32(d ^ a,8); \
+	c += d; b = ROTR32(b ^ c, 7); \
 }
 
 static void Blake2Shost(uint32_t * inout, const uint32_t * inkey)
@@ -1549,4 +1549,3 @@ void neoscrypt_setBlockTarget(uint32_t* const pdata, uint32_t* const target)
 	cudaMemcpyToSymbol(c_data, PaddedMessage, 64 * sizeof(uint32_t), 0, cudaMemcpyHostToDevice);
 	CUDA_SAFE_CALL(cudaGetLastError());
 }
-
